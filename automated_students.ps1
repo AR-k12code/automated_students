@@ -1,27 +1,86 @@
 #Requires -Version 7.0
+#Get-Help .\automated_students.ps1
+#Get-Help .\automated_students.ps1 -Examples
+#  ___ _____ ___  ___   ___   ___    _  _  ___ _____         
+# / __|_   _/ _ \| _ \ |   \ / _ \  | \| |/ _ \_   _|        
+# \__ \ | || (_) |  _/ | |) | (_) | | .` | (_) || |          
+# |___/ |_| \___/|_|   |___/ \___/  |_|\_|\___/ |_|
 
-# Automated Student Account Creation Script
-# Craig Millsap, Gentry Public Schools, cmillsap@gentrypioneers.com, 9/2020
+#  ___ ___ ___ _____   _____ _  _ ___ ___   ___ ___ _    ___ 
+# | __|   \_ _|_   _| |_   _| || |_ _/ __| | __|_ _| |  | __|
+# | _|| |) | |  | |     | | | __ || |\__ \ | _| | || |__| _| 
+# |___|___/___| |_|     |_| |_||_|___|___/ |_| |___|____|___|
+#    
+# Please see the https://www.github.com/carbm1/automated_students for more information.
 
-# This script was originally designed around the Clever CSV import files.
-# It is now based on the SQLite included with this project and is required.
+<#
+  .SYNOPSIS
+  This script is used to manage student accounts in Active Directory based on the database built by automated_database.ps1.
+  
+  .NOTES
+    Author: Craig Millsap
+    Creation Date: 3/2021
+    Note: We should probably turn on Indexing on the EmployeeNumber attribute in AD.
 
-# We should turn on Indexing on the EmployeeNumber attribute
+  .EXAMPLE
+  PS> .\automated_students.ps1 -Staging
+  This will write to terminal all the changes the script believes it will make to Active Directory. Including creating OU's, new students, groups, etc.
+
+  .EXAMPLE
+  PS> .\automated_students.ps1 -ResetAllPasswords
+  This will generate a new password for all student accounts and put them in the database.
+
+  .EXAMPLE
+  PS> .\automated_students.ps1 -QuickMode
+  This will compare SQLite and Active Directory to find mismatched Student ID, First Name, Last Name. This will skip all other students.
+  
+  .PARAMETER Staging
+  This parameter is used to control if you want changes made to your AD or not. It is ON by default in the settings.ps1 file.
+
+  .PARAMETER VerboseStudent
+  This will output to the terminal information about existing and new students while the script is running.
+
+  .PARAMETER ResetAllPasswords
+  This will reset every student password and record it to the database. This is useful for new school years.
+
+  .PARAMETER QuickMode
+  This mode will compare the students in the SQLite Database and Active Directory and only evaluate the mismatched Student ID, First Name, and Last Name.
+
+  .PARAMETER SkipStudents
+  Skips processing existing or new students. This will still create the OU structure and groups.
+
+  .PARAMETER SkipNewStudents
+  Skip creating new student acounts. This will still process existing accounts.
+
+  .PARAMETER SkipExistingStudents
+  Skip processing existing student accounts. This will still create new accounts.
+
+  .PARAMETER StopAfterXNew
+  This will stop the script after it creates X number of new students.
+
+  .PARAMETER StopAfterXExisting
+  This will stop the script after it processes X number of existing students.
+
+  .PARAMETER DisablePostProcessingScript
+  This will disable invoking x_PostProcessingAutomatedStudents.ps1. Staging also disables this.
+
+#>
 
 Param(
     [Parameter(Mandatory=$false)][switch]$Staging, #don't make changes to domain
-    [Parameter(Mandatory=$false)][int]$Threads=1, #anymore than this seems to cause problems. Probably with a backlog of generating SIDs.
     [Parameter(Mandatory=$false)][switch]$SkipStudents,
     [Parameter(Mandatory=$false)][switch]$SkipNewStudents,
     [Parameter(Mandatory=$false)][switch]$SkipExistingStudents,
     [Parameter(Mandatory=$false)][switch]$ResetAllPasswords,
     [Parameter(Mandatory=$false)][switch]$VerboseStudent,
     [Parameter(Mandatory=$false)][switch]$DisablePostProcessingScript, #Do not run the final script.
+    [Parameter(Mandatory=$false)][switch]$DisableRunningPostProcessingScriptsSyncronous, #This will run the post processing Syncronous Scripts ASyncronously.
     [Parameter(Mandatory=$false)][switch]$RenewEmailPassword,
     [Parameter(Mandatory=$false)][int]$StopAfterXNew, #Testing something on new accounts? Only create this number then quit. Useful while testing x_InterimProcessingNewAccounts.ps1
     [Parameter(Mandatory=$false)][int]$StopAfterXExisting, #Testing on existing accounts? Only create this number then quit. Useful while testing x_InterimProcessingExistingAccounts.ps1
     [Parameter(Mandatory=$false)][switch]$ForceDoNotRequireDomainAdmin, #I'm serious. You can mess things up if you can't read confidentiality bits.
-    [Parameter(Mandatory=$false)][switch]$SkipDisablingAccounts #This will skip disabling accounts that have an EmployeeNumber and are not in the exclusions or in the students table. This does nothing for accounts that do not have EmployeeNumbers.
+    [Parameter(Mandatory=$false)][switch]$SkipDisablingAccounts, #This will skip disabling accounts that have an EmployeeNumber and are not in the exclusions or in the students table. This does nothing for accounts that do not have EmployeeNumbers.
+    [Parameter(Mandatory=$false)][switch]$QuickMode #This will only evaulate accounts that do not have a match on a Student ID in AD AND have a mismatched GivenName and Surname in case they neeed reanmed. All other accounts are ignored.
 )
 
 $currentPath=(Split-Path ((Get-Variable MyInvocation -Scope 0).Value).MyCommand.Path)
@@ -33,11 +92,21 @@ try {
     Stop-TranScript; Start-Transcript($logfile)
 }
 
+$timestamp = [int64](Get-Date -UFormat %s)
+
 #Pull in settings
 if (Test-Path $currentPath\settings.ps1) {
     . $currentPath\settings.ps1
 } else {
     Write-Host "Error: Missing settings.ps1 file. Please read documentation." -ForegroundColor Red
+    exit(1)
+}
+
+#Pull in functions
+if (Test-Path $currentPath\z_functions.ps1) {
+    . $currentPath\z_functions.ps1
+} else {
+    Write-Host "Error: Missing z_functions.ps1 file. Please read documentation." -ForegroundColor Red
     exit(1)
 }
 
@@ -74,15 +143,8 @@ if (-Not($DoNotRequireAdminstrator)) { #Hope you know what you're doing.
 }
 
 #####################################################################
-# Dependencies - PSCore7, CognosDownloader, ActiveDirectory, NTFSSecurity,PSQLite Modules
+# Dependencies - CognosDownloader, ActiveDirectory, NTFSSecurity,PSQLite Modules
 #####################################################################
-
-# I attempted to use the new parallel feature but it kept killing my DCs. DO NOT USE THAT FEATURE OF PWSH7.
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    Write-Host "This script requires Powershell 7 or higher." -foregroundcolor RED
-    exit(1)
-}
-
 
 if (Get-Module -ListAvailable | Where-Object {$PSItem.name -eq "ActiveDirectory"}) {
     try { Import-Module ActiveDirectory } catch { Write-Host "Error: Unable to load module ActiveDirectory." -ForegroundColor RED; exit(1) }
@@ -122,23 +184,30 @@ if (Get-Module -ListAvailable | Where-Object {$PSItem.name -eq "NTFSSecurity"}) 
     }
 }
 
-#PSSQLite Module is required.
-if (Get-Module -ListAvailable | Where-Object {$PSItem.name -eq "PSSQLite"}) {
-    Import-Module PSSQLite
+#SimplySQL Module is required.
+if (Get-Module -ListAvailable | Where-Object {$PSItem.name -eq "SimplySQL"}) {
+    Import-Module SimplySQL
   } else {
-    Write-Host 'PSSQLite Module not found!'
+    Write-Host 'SimplySQL Module not found!'
     if ($(@('Y','y','YES','yes','Yes')) -contains $(Read-Host -Prompt 'Would you like to try and automatically install it? y/n')) {
         try {
-            Install-Module -Name PSSQLite -Scope AllUsers -Force
-            Import-Module PSSQLite
+            Install-Module -Name SimplySQL -Scope AllUsers -Force
+            Import-Module SimplySQL
         } catch {
-            Write-Host 'Failed to install PSSQLite Module.' -ForegroundColor RED
+            Write-Host 'Failed to install SimplySQL Module.' -ForegroundColor RED
             exit(1)
         }
     } else {
         exit(1)
     }
   }
+
+#Connect Database
+try {
+    Connect-Database -Database $database
+} catch {
+    Write-Host "Error: Failed to connect to database engine." -ForegroundColor Red; exit(1)
+}
 
 #mail
 if ($smtpAuth) {
@@ -164,22 +233,31 @@ $validschools.Values | ForEach-Object {
     }
 }
 
-#Pull in functions
-if (Test-Path $currentPath\z_functions.ps1) {
-    . $currentPath\z_functions.ps1
-} else {
-    Write-Host "Error: Missing z_functions.ps1 file. Please read documentation." -ForegroundColor Red
-    exit(1)
-}
-
 #Active Directory Information
 try {
     $domain = $(Get-ADDomain).DistinguishedName
     $domainfqdn = $(Get-ADDomain).Forest
+    
+    #This is necessary in a large domain. You need to work with the operations managers of your domain controllers or cmdlets timeout.
+    $PSDefaultParameterValues = @{"*-AD*:Server"="$((Get-ADDomain).InfrastructureMaster)"}
+
 } catch {
     Write-Host 'Error: Unable to Access domain controller.' -ForegroundColor Red
     Send-EmailNotification -subject "Automated_Students: Failure" -body "Error: Unable to Access domain controller."
     exit(1)
+}
+
+#Verify AD Replication
+$ADServersOutOfSync = @()
+Get-ADReplicationPartnerMetadata -Target "$env:userdnsdomain" -Scope Domain | Select-Object Server, LastReplicationAttempt, LastReplicationSuccess | ForEach-Object {
+    if ($PSItem.LastReplicationAttempt -ne $PSItem.LastReplicationSuccess) { 
+        Write-Host "WARN: There appears to be an AD Replication Issue with",$PSItem
+        $ADServersOutOfSync += $PSItem
+    }
+}
+if ($ADServersOutOfSync.Count -ge 1) {
+    Send-EmailNotification -subject "Automated_Students: AD Replication Error" -body "Error: There are AD replications that have not succeeded The Automated Students will contintue but these replication failures can cause other issues.`r`nPlease review:`r`n`
+    $($ADServersOutOfSync | ForEach-Object { "Server: $($PSitem.Server)`r`nLast Replication Attempt: $($PSitem.LastReplicationAttempt)`r`nLast Replication Success: $($PSitem.LastReplicationSuccess)`r`n`r`n" })"
 }
 
 #Find GAM if requested.
@@ -200,15 +278,12 @@ if (($GAMprecreateUser) -OR ($GAMsetModerationRules) -OR ($GAMVerifyModerationRu
 }
 
 #####################################################################
-# Required folder for Cognos Reports then loop through and download
-# required reports. We are not checking here for failures.
-# The CognosDownload.ps1 script does error checking and will send an email notification.
-# If downloading updated reports fails the script will continue with existing files.
+# Pull Students data from the SQLite database.
 #####################################################################
 try {
-    #$studentsCSV = Invoke-SQLiteQuery -DataSource $database -Query "SELECT students.*,Student_nickname,Student_gradyr FROM students LEFT JOIN students_extras ON students.Student_id = students_extras.Student_id ORDER BY Student_id DESC" -ErrorAction 'STOP' 
+    #$studentsCSV = invoke-SqlQuery -Query "SELECT students.*,Student_nickname,Student_gradyr FROM students LEFT JOIN students_extras ON students.Student_id = students_extras.Student_id ORDER BY Student_id DESC" -ErrorAction 'STOP' 
     #sorting by highest number first causes new accounts to be created first BUT it if you redo things it will cause a younger duplicate name conflict to have precidence.
-    $studentsCSV = Invoke-SQLiteQuery -DataSource $database -Query 'SELECT
+    $studentsCSV = invoke-SqlQuery -Query 'SELECT
         students.*,Student_nickname,Student_gradyr
         FROM students
         LEFT JOIN students_extras ON students.Student_id = students_extras.Student_id
@@ -225,6 +300,23 @@ try {
     exit(1)
 }
 
+# Verify we do not have any duplicate EmployeeNumbers in AD. This WILL break things if there are duplicate EmployeeNumbers anywhere in the directory.
+try {
+    $duplicateCheck = Get-ADUser -Filter { EmployeeNumber -like "*" } -Properties EmployeeNumber | Group-Object -Property EmployeeNumber | Where-Object { $PSItem.count -gt 1 }
+    if ($duplicateCheck.Count -gt 1) {
+        $duplicateCheck | ForEach-Object {
+            $PSItem.Group | ForEach-Object {
+                Write-Host "Error: $($PSItem.EmployeeNumber),$($PSItem.DistinguishedName)"
+            }
+        }
+        Write-Host "Error: There are duplicate EmployeeNumber attributes in your Active Directory. You must resolve this before continuing." -ForeGroundColor RED
+        Send-EmailNotification -subject "Automated_Students: Duplicate Failure" -body "Error: There are duplicate EmployeeNumber attributes in your Active Directory. You must resolve this before continuing.`r`nPlease inspect the log file $($logfile) for more details."
+        exit(1)
+    }
+} catch { 
+    Write-Host "Error: Could not run duplicate EmployeeNumber check on domain."
+    exit (1)
+}
 
 #####################################################################
 # Find students who are Enabled in AD but are not in the CSV.
@@ -244,11 +336,11 @@ switch ($adStructure) {
 
 #get currently active student ID numbers in AD
 if (@(1,2,4,5) -contains $adStructure) {
-    $adStudents = Get-ADUser -Filter "(EmployeeNumber -like ""$($studentIDPrefix)*"") -and (Enabled -eq 'True')" -SearchBase "ou=Students,$domain" -Properties EmployeeNumber,memberof
+    $adStudents = Get-ADUser -Filter "(EmployeeNumber -like ""$($studentIDPrefix)*"") -and (Enabled -eq 'True')" -SearchBase "ou=Students,$domain" -Properties EmployeeNumber,memberof | Where-Object { $PSItem.DistinguishedName -notlike "*OU=Excluded*" }
 } elseif (@(3,6) -contains $adStructure) {
     $adStudents = @()
     $stuOUs | ForEach-Object {
-        $adStudents += Get-ADUser -Filter "(EmployeeNumber -like ""$($studentIDPrefix)*"") -and (Enabled -eq 'True')" -SearchBase "$PSItem" -Properties EmployeeNumber,memberof
+        $adStudents += Get-ADUser -Filter "(EmployeeNumber -like ""$($studentIDPrefix)*"") -and (Enabled -eq 'True')" -SearchBase "$PSItem" -Properties EmployeeNumber,memberof | Where-Object { $PSItem.DistinguishedName -notlike "*OU=Excluded*" }
     }
 }
 
@@ -258,25 +350,29 @@ $activeStudentIDs += $adStudents | Select-Object -ExpandProperty EmployeeNumber
 #Calculate changes and if it exceeds our daily maximum then abort.
 if (-Not($SkipDisablingAccounts)) {
     #Count New and Deactivated.
-    if ((Compare-Object $activeStudentIDs $validStudentIDs -PassThru).count -ge $maxChanges) {
-        Write-Host "Error: Calculated changes `($([string]$($(Compare-Object $activeStudentIDs $validStudentIDs -PassThru).count))`) exceed the set maximum changes of $($maxChanges). Please make sure you adjust your settings.ps1 file. Disabling accounts are included in this count."
+    $calculatedChanges = (Compare-Object $activeStudentIDs $validStudentIDs -PassThru).count
+    if ($calculatedChanges -ge $maxChanges) {
+        Write-Host "Error: Calculated changes",$calculatedChanges,"exceed the set maximum changes of $($maxChanges). Please make sure you adjust your settings.ps1 file. Disabling accounts are included in this count."
         if (-Not($staging)) {
-            Send-EmailNotification -subject "Automated_Students: Failure" -body "Error: Calculated changes `($([string]$($(Compare-Object $activeStudentIDs $validStudentIDs -PassThru).count))`) exceed the set maximum changes of $($maxChanges). Please make sure you adjust your settings.ps1 file. Disabling accounts are included in this count."
+            Send-EmailNotification -subject "Automated_Students: Failure" -body "Error: Calculated changes $($calculatedChanges) exceed the set maximum changes of $($maxChanges). Please make sure you adjust your settings.ps1 file. Disabling accounts are included in this count."
             exit(1)
         }
     } else {
         Write-Host "Info: Current allowed number of new and disabled students is $($maxChanges). This is roughly $([int]($maxChanges / ($studentsCSV | measure-object).Count * 100))% of your students."
+        Write-Host "Info: Calculated number of new/disabled accounts:",$calculatedChanges
     }
 } else {
     #Count New Only
-    if ((Compare-Object $activeStudentIDs $validStudentIDs | Where-Object { $PSItem.SideIndicator -eq '=>' }).count -ge $maxChanges) {
-        Write-Host "Error: Calculated changes `($([string]$($(Compare-Object $activeStudentIDs $validStudentIDs | Where-Object { $PSItem.SideIndicator -eq '=>' }).count))`) exceed the set maximum changes of $($maxChanges). Please make sure you adjust your settings.ps1 file. The disabling of accounts are NOT included in this count."
+    $calculatedNewChanges = (Compare-Object $activeStudentIDs $validStudentIDs | Where-Object { $PSItem.SideIndicator -eq '=>' }).count
+    if ($calculatedNewChanges -ge $maxChanges) {
+        Write-Host "Error: Calculated changes $($calculatedNewChanges) exceed the set maximum changes of $($maxChanges). Please make sure you adjust your settings.ps1 file. The disabling of accounts are NOT included in this count."
         if (-Not($staging)) {
-            Send-EmailNotification -subject "Automated_Students: Failure" -body "Error: Calculated changes `($([string]$($(Compare-Object $activeStudentIDs $validStudentIDs -PassThru).count))`) exceed the set maximum changes of $($maxChanges). Please make sure you adjust your settings.ps1 file. The disabling of accounts are NOT included in this count."
+            Send-EmailNotification -subject "Automated_Students: Failure" -body "Error: Calculated changes $($calculatedNewChanges) exceed the set maximum changes of $($maxChanges). Please make sure you adjust your settings.ps1 file. The disabling of accounts are NOT included in this count."
             exit(1)
         }
     } else {
         Write-Host "Info: Current allowed number of new and disabled students is $($maxChanges). This is roughly $([int]($maxChanges / ($studentsCSV | measure-object).Count * 100))% of your students."
+        Write-Host "Info: Calculated number of new accounts:",$calculatedNewChanges
     }
 }
 
@@ -285,16 +381,18 @@ if (Test-Path $currentPath\exclusions.csv) {
     Write-Host "Info: Exclusion CSV detected." -ForegroundColor YELLOW
     $excludeCSV = Import-CSV $currentPath\exclusions.csv
     #$headers = 
-    if (($excludeCSV | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name) -contains 'Student_id') {
-        $excludedStudentIDs = $excludeCSV | Select-Object -ExpandProperty Student_id
-        #Now we need their email addresses to exclude them from Distribution Group Removal.
-        $excludedAccounts = @()
-        $excludedStudentIDs | ForEach-Object { $id = $PSItem; $excludedAccounts += Get-ADUser -Filter { EmployeeNumber -eq $id } | Select-Object -ExpandProperty SamAccountName }
-        Write-Host "Info: Student ID numbers", "$($excludedStudentIDs -join (','))", "will be excluded from this automation script. Account will not be created, modified, or disabled." -ForegroundColor YELLOW
-    } else {
-        Write-Host "Error: Exclusion CSV does not contain a Student_id column!" -ForegroundColor RED
-        Send-EmailNotification -subject "Automated_Students: Failure" -body "Exclusion CSV does not contain a Student_id column."
-        exit(1)
+    if ((Get-Content $currentPath\exclusions.csv).Count -gt 1) {
+        if (($excludeCSV | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name) -contains 'Student_id') {
+            $excludedStudentIDs = $excludeCSV | Select-Object -ExpandProperty Student_id
+            #Now we need their email addresses to exclude them from Distribution Group Removal.
+            $excludedAccounts = @()
+            $excludedStudentIDs | ForEach-Object { $id = $PSItem; $excludedAccounts += Get-ADUser -Filter { EmployeeNumber -eq $id } | Select-Object -ExpandProperty SamAccountName }
+            Write-Host "Info: Student ID numbers", "$($excludedStudentIDs -join (','))", "will be excluded from this automation script. Account will not be created, modified, or disabled." -ForegroundColor YELLOW
+        } else {
+            Write-Host "Error: Exclusion CSV does not contain a Student_id column!" -ForegroundColor RED
+            Send-EmailNotification -subject "Automated_Students: Failure" -body "Exclusion CSV does not contain a Student_id column."
+            exit(1)
+        }
     }
 }
 
@@ -314,7 +412,10 @@ if (-Not($SkipDisablingAccounts)) {
         } else {
             Write-Host "Info: Disabling account $($accountToDisable.'DistinguishedName')" -ForeGroundColor Yellow
             Disable-ADAccount -Identity $accountToDisable -Confirm:$False
-                
+            
+            #Log Event Disable
+            Invoke-SqlUpdate -Query "INSERT INTO action_log (Student_id, Identity, Action, Timestamp) VALUES ($studentid,""$($accountToDisable.UserPrincipalName)"",""Disable"",""$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"")" | Out-Null
+
             #remove from all group memberships
             $accountToDisable | Select-Object -ExpandProperty memberof | ForEach-Object { Remove-ADPrincipalGroupMembership -Identity $accountToDisable -MemberOf $PSItem -Confirm:$false }
         }
@@ -323,6 +424,74 @@ if (-Not($SkipDisablingAccounts)) {
     Write-Host "Info: You have turned off disabling existing accounts with the `$SkipDisablingAccounts in settings.ps1." -ForegroundColor Yellow
     if ($staging) {
         Write-Host "Info: Staging will not report accounts that would be disabled with `$SkipDisablingAccounts enabled." -ForegroundColor Yellow
+    }
+}
+
+#Overrides List
+if (Test-Path $currentPath\overrides.csv) {
+    Write-Host "Info: Overrides CSV detected." -ForegroundColor YELLOW
+    $overridesCSV = Import-CSV $currentPath\overrides.csv
+    #$headers = 
+    if ((Get-Content $currentPath\overrides.csv).Count -gt 1) {
+        if (($overridesCSV | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name) -contains 'Student_id') {
+            #Student_id needs to be an integer instead of string.
+            $overridedAccounts = $overridesCSV | Select-Object -Property @{Name = 'Student_id'; Expression = { [int]$PSitem.'Student_id' }},First_name,Last_name,Middle_Initial | Group-Object -Property Student_id -AsHashTable
+            Write-Host "Info: Student ID numbers", "$($overridedAccounts.Keys -join (','))", "will have their information overridden per the overrides.csv file." -ForegroundColor YELLOW
+        } else {
+            Write-Host "Error: Overrides CSV does not contain a Student_id column!" -ForegroundColor RED
+            Send-EmailNotification -subject "Automated_Students: Failure" -body "Override CSV does not contain a Student_id column."
+            exit(1)
+        }
+    }
+}
+
+#QuickMode
+#This will compare our AD to the SQL Database and only run against accounts that do not exist in AD or have mismatched GivenName and Surname.
+if ($QuickMode) {
+    try {
+        $adstudents = Get-ADUser -Filter { Enabled -eq $True -and EmployeeNumber -like "*" } -SearchBase "ou=Students,$((Get-ADDomain).DistinguishedName)" -properties EmployeeNumber #| Select-Object -Property @{Name='EmployeeNumber';Expression={[int]$PSItem.'EmployeeNumber'}},GivenName,Surname
+        $adstudentsobj = @()
+        $adstudents | ForEach-Object { 
+            #evaluate if overriddedAccounts has this student.
+            if ($overridedAccounts.([int]($PSItem.EmployeeNumber))) {
+                $adstudentsobj += [PSCUSTOMOBJECT]@{ "EmployeeNumber" = $PSItem.EmployeeNumber; "Surname" = ($overridedAccounts.([int]($PSItem.EmployeeNumber))).Last_name; "GivenName" = ($overridedAccounts.([int]($PSItem.EmployeeNumber))).First_name }
+            } else {
+                $adstudentsobj += [PSCUSTOMOBJECT]@{ "EmployeeNumber" = $PSItem.EmployeeNumber; "Surname" = $PSItem.surname; "GivenName" = $PSItem.givenName }
+            }
+        }
+
+        #If $useNickname is set to true then evaluate on the nickname field for QuickMode.
+        if ($useNickname) {
+            $sqlstudentsobj = invoke-SqlQuery -Query 'SELECT
+            students.Student_id AS EmployeeNumber,
+            CASE
+                WHEN LENGTH(Student_nickname) > 1 THEN Student_nickname
+                ELSE First_name
+                END
+            AS Givenname,
+            Last_name as Surname
+            FROM students
+            INNER JOIN students_extras ON students.Student_id = students_extras.Student_id'
+        } else {
+            $sqlstudentsobj = invoke-SqlQuery -Query "SELECT Student_id AS EmployeeNumber,First_name as GivenName,Last_name as Surname FROM students"
+        }
+
+        $studentIds = Compare-Object -ReferenceObject $adstudentsobj -DifferenceObject $sqlstudentsobj -Property EmployeeNumber,Surname,Givenname -PassThru | Select-Object -ExpandProperty EmployeeNumber -Unique
+        
+        if ($studentIds.Count -ge 1) {
+            $studentsCSV = invoke-SqlQuery -Query "SELECT students.*,Student_nickname,Student_gradyr `
+            FROM students `
+            LEFT JOIN students_extras ON students.Student_id = students_extras.Student_id `
+            WHERE students.Student_id IN ($($studentIds -join ',')) `
+            ORDER BY students.Student_id" -ErrorAction 'STOP'
+        } else {
+            $studentsCSV = @()
+        }
+
+        Write-Host "Info: QuickMode has been specified. We will only be evaulating", ($studentIds | Measure-Object).count, "accounts."
+    } catch {
+        Write-Host "Error: Failed to compare and query students in QuickMode. $($_)"
+        exit(1)
     }
 }
 
@@ -337,14 +506,14 @@ if (-Not($SkipDisablingAccounts)) {
 $stuOUs = @()
 switch ($adStructure) {
     1 { #1 = STUDENTS/GRADYR
-        $requiredOUs = $studentsCSV | Select-Object -Property School_id,Student_gradyr -Unique
+        $requiredOUs = $studentsCSV | Select-Object -Property School_id,Student_gradyr -Unique | Where-Object { $PSItem.Student_gradyr -ne $null }
         $stuOUs += @("ou=Students,$($domain)","ou=Disabled,ou=Students,$($domain)","ou=Restricted,ou=Students,$($domain)")
         $requiredOUs | ForEach-Object {
             $stuOUs += @("ou=$($PSItem.'Student_gradyr'),ou=Students,$($domain)")
         }
     }
     2 { #2 = STUDENTS/SCHOOL/GRADYR
-        $requiredOUs = $studentsCSV | Select-Object -Property School_id,Student_gradyr -Unique
+        $requiredOUs = $studentsCSV | Select-Object -Property School_id,Student_gradyr -Unique | Where-Object { $PSItem.Student_gradyr -ne $null }
         $stuOUs += @("ou=Students,$($domain)","ou=Disabled,ou=Students,$($domain)")
         $validschools.Values | ForEach-Object {
             $stuOUs += @("ou=$($PSItem),ou=Students,$($domain)","ou=Restricted,ou=$($PSItem),ou=Students,$($domain)")
@@ -354,7 +523,7 @@ switch ($adStructure) {
         }
     }
     3 { #3 = SCHOOL/STUDENTS/GRADYR
-        $requiredOUs = $studentsCSV | Select-Object -Property School_id,Student_gradyr -Unique
+        $requiredOUs = $studentsCSV | Select-Object -Property School_id,Student_gradyr -Unique | Where-Object { $PSItem.Student_gradyr -ne $null }
         $validschools.Values | ForEach-Object { $stuOUs += @("ou=$($PSItem),$($domain)") }
         $validschools.Values | ForEach-Object {
             $stuOUs += @("ou=Students,ou=$($PSItem),$($domain)","ou=Disabled,ou=Students,ou=$($PSItem),$($domain)","ou=Restricted,ou=Students,ou=$($PSItem),$($domain)")
@@ -469,7 +638,8 @@ switch ($adStructure) {
             }
         }
     }
-    2 {
+    #2 and 5 are identical.
+    { @(2,5) -contains $_ } {
         #permissions need to be set on the school OU only.
         $validschools.Values | ForEach-Object {
             $ou = "ou=$($PSItem),ou=Students,$($domain)"
@@ -496,7 +666,8 @@ switch ($adStructure) {
             }
         }
     }
-    3 { 
+    #3 and 6 are identical
+    { @(3,6) -contains $_ } { 
         $requiredOUs | ForEach-Object {
             $schoolName = $($validschools.$([int]$PSItem.'School_id'))
             $ou = "ou=Students,ou=$($schoolName),$($domain)"
@@ -556,68 +727,6 @@ switch ($adStructure) {
             } catch {
                 Write-Host "Error: Failed to set permissions for the Management Account `"$groupName`" on $($gradeOU)."
                 Send-EmailNotification -subject "Automated_Students: Failure" -body "Error: Failed to set permissions for the Management Account `"$groupName`" on $($gradeOU)."
-                exit(1)
-            }
-        }
-    }
-    5 {
-        #permissions need to be set on the school OU only.
-        $validschools.Values | ForEach-Object {
-            $grade = $PSItem.'Grade'
-
-            switch ($grade) {
-                'Prekindergarten' { $grade = 'PK' }
-                'Kindergarten' { $grade = 'K' }
-            }
-
-            $ou = "ou=$($grade),ou=Students,$($domain)"
-            $groupName = "Student Management Accounts - $($PSItem)"
-            if (-Not(Get-AdGroup -Filter { SamAccountName -eq $groupName } -ErrorAction SilentlyContinue)) {
-                if ($staging) {
-                    Write-Host "Staging: New Security Group `"$($groupName)`" at $($ou)" -ForeGroundColor Yellow
-                    New-ADGroup -Name $groupName -Path "ou=Students,$($domain)" -GroupScope Global -WhatIf
-                } else {
-                    New-ADGroup -Name $groupName -Path "ou=Students,$($domain)" -GroupScope Global
-                }
-            }
-            try {
-                Write-Host "Setting permissions for `"$groupName`" on $($ou)"
-                if ($staging) {
-                    Write-Host "Staging: Grant Password Reset for `"$($groupName)`" on $($ou)" -ForeGroundColor Yellow
-                } else {
-                    Grant-PasswordResetOnOU -group $groupName -ou $ou
-                }
-            } catch {
-                Write-Host "Error: Failed to set permissions for the Management Account `"$groupName`" on $($ou)."
-                Send-EmailNotification -subject "Automated_Students: Failure" -body "Error: Failed to set permissions for the Management Account `"$groupName`" on $($ou)."
-                exit(1)
-            }
-        }
-    }
-    6 { 
-        $requiredOUs | ForEach-Object {
-            $schoolName = $($validschools.$([int]$PSItem.'School_id'))
-            $ou = "ou=Students,ou=$($schoolName),$($domain)"
-            $ouPath = $ou.split(',')[1..($ou.Length-1)] -join(',')
-            $groupName = "Student Management Accounts - $($schoolName)"
-            if (-Not(Get-AdGroup -Filter { SamAccountName -eq $groupName } -ErrorAction SilentlyContinue)) {
-                if ($staging) {
-                    Write-Host "Staging: New Security Group `"$($groupName)`" at $($ouPath)" -ForeGroundColor Yellow
-                    New-ADGroup -Name $groupName -Path $ouPath -GroupScope Global -WhatIf
-                } else {
-                    New-ADGroup -Name $groupName -Path $ouPath -GroupScope Global
-                }
-            }
-            try {
-                Write-Host "Setting permissions for `"$groupName`" on $($ou)"
-                if ($staging) {
-                    Write-Host "Staging: Grant Password Reset for `"$($groupName)`" on $($ou)" -ForeGroundColor Yellow
-                } else {
-                    Grant-PasswordResetOnOU -group $groupName -ou $ou
-                }
-            } catch {
-                Write-Host "Error: Failed to set permissions for the Management Account `"$groupName`" on $($ou)."
-                Send-EmailNotification -subject "Automated_Students: Failure" -body "Error: Failed to set permissions for the Management Account `"$groupName`" on $($ou)."
                 exit(1)
             }
         }
@@ -721,6 +830,7 @@ $stuEmailDomain.Values | ForEach-Object {
 #####################################################################
 
 if (-Not(Test-Path $currentPath\passwords)) { New-Item -ItemType Directory -Path $currentPath\passwords }
+if (-Not(Test-Path $currentPath\passwords\exports)) { New-Item -ItemType Directory -Path $currentPath\passwords\exports }
 if ($ResetAllPasswords) {
     $passwordheader = "Student ID,Full Name,Email Address,Password`r`n"
     $validschools.Values | ForEach-Object {
@@ -745,21 +855,14 @@ if ($ResetAllPasswords) {
 #####################################################################
 
 
-
-if (-Not($SkipStudents)) { #skip this whole process.
-
 $newStudents = @() #In order to send an email at the end for all new students.
 $errorCount = 0
 $errorMessage = @()
-#In my testing you should not do more than 4 threads due to conflicts. Unfortunately, I had to abandon the parallel.
-#$studentsCSV | ForEach-Object -ThrottleLimit $Threads -TimeoutSeconds 0 -Parallel {
-$studentsCSV | ForEach-Object {
 
-    #if ($usererror -eq $True) { continue }
-    
-    #running in parallel requires us to pull in the variables and functions again.
-    #. ./settings.ps1
-    #. ./z_functions.ps1
+if (-Not($SkipStudents)) { #skip this whole process.
+
+#Unfortunately this can not be a Parallel ForEach loop. It locks the DCs.
+$studentsCSV | ForEach-Object {
 
     $student = $PSItem
     $studentId = [int]$student.'Student_id'
@@ -767,8 +870,8 @@ $studentsCSV | ForEach-Object {
     #excluded accounts shouldn't have anything done to them.
     if ($excludedStudentIDs -contains $studentId) { return }
 
-    $givenName = $student.'First_name'
-    $surName = $student.'Last_name'
+    $givenName = $student.'First_name' #This is done for a reason. Can't remember why.
+    $surName = $student.'Last_name' #This is done for a reason. Can't remember why.
 
     $firstName = Remove-Spaces(Remove-SpecialCharacters($student.'First_name'))
 
@@ -799,8 +902,6 @@ $studentsCSV | ForEach-Object {
 
     $lastName = Remove-Spaces($lastName) #Remove spaces after evaulating if $useFirstSpacedLastName is $True.
 
-    $fullName = $firstName + ' ' + $lastName
-   
     switch ($student.'Grade') {
         'Prekindergarten' { $grade = 'PK' }
         'Kindergarten' { $grade = 'K' }
@@ -809,6 +910,20 @@ $studentsCSV | ForEach-Object {
         default { $grade = $student.'Grade' }
     }
 
+    #Overrides
+    if ($overridedAccounts.$studentId) {
+        $override = $overridedAccounts.$studentId
+        $firstName = Remove-Spaces(Remove-SpecialCharacters($override.First_name))
+        $givenName = $firstName
+        $lastName = Remove-Spaces(Remove-SpecialCharacters($override.Last_name))
+        $surName = $lastName
+        $middleInitial = Remove-Spaces(Remove-SpecialCharacters($override.MiddleInitial))[0]
+        #$grade = $override.Grade
+        Write-Host "Info: Student $($override.Student_id) will use $firstName $lastName per the overrides.csv file."
+    }
+
+    $fullName = $firstName + ' ' + $lastName
+
     $gender = $student.'Gender'
     $buildingNumber = [int]$student.'School_id'
     $buildingShortName = $validschools.$([int]$student.'School_id')
@@ -816,8 +931,8 @@ $studentsCSV | ForEach-Object {
 
     if (($null -eq $gradyr) -or ($gradyr -eq '')) {
         Write-Host "Error: Missing GradYR for student $($studentId). Skipping Student as we need that data."
-        errorCount++
-        errorMessage += @("Error: Missing GradYR for student $($studentId). Skipping Student as we need that data.")
+        $errorCount++
+        $errorMessage += @("Error: Missing GradYR for student $($studentId). Skipping Student as we need that data.")
         return
     }
 
@@ -877,11 +992,19 @@ $studentsCSV | ForEach-Object {
             $username = $username + '.' + $([string]$gradyr).Substring(2,2) 
         }
         7 { #[firstname].[first3oflastname][last2ofgradyr]
-            $username = "$($firstName + '.' + $($lastName.Substring(0,3)))"
+            if ($lastName.length -gt 3) { $lnUsername = ($lastName.Substring(0,3)) } else { $lnUsername = $lastName }
+            $username = "$($firstName + '.' + $lnUsername)"
             $principalName = $username + $([string]$gradyr).Substring(2,2) + $emailDomain
             $emailAddress = $username + $([string]$gradyr).Substring(2,2) + $emailDomain
-            if ($username.Length -gt 18) { $username = "$($($firstName.Substring(0,14)) + '.' + $($lastName.Substring(0,3)))" } #shortens first name to meet 20 characters
+            if ($username.Length -gt 18) { $username = "$($($firstName.Substring(0,14)) + '.' + $($lnUsername))" } #shortens first name to meet 20 characters
             $username = $username + $([string]$gradyr).Substring(2,2)
+        }
+        8 { #[first5oflastname][first5offirstname][last2ofgradyr] #This will never be longer than the maximum SAMAccountName length.
+            if ($firstName.length -gt 5) { $fnUsername = ($firstName.Substring(0,5)) } else { $fnUsername = $firstName }
+            if ($lastName.length -gt 5) { $lnUsername = ($lastName.Substring(0,5)) } else { $lnUsername = $lastName }
+            $username = "$($lnUsername)$($fnUsername)" + $([string]$gradyr).Substring(2,2)
+            $principalName = $username + $emailDomain
+            $emailAddress = $username + $emailDomain
         }
     }
 
@@ -889,7 +1012,7 @@ $studentsCSV | ForEach-Object {
         $homeDirRoot = $homeDirectoryRoot.$buildingNumber + $($buildingShortName) + '\'
         if (@(1,2,3) -contains $adstructure) {
             $homeDirPath = "$($homeDirRoot)$($gradyr)"
-        } elseif (@(2,3,4) -contains $adStructure) {
+        } elseif (@(4,5,6) -contains $adStructure) {
             $homeDirPath = "$($homeDirRoot)$($grade)"
         }
         $homeDir = "$($homeDirPath)\$($username)"
@@ -963,7 +1086,7 @@ $studentsCSV | ForEach-Object {
             
             if ($stuGradYrRename){
                 if ($existingAccount.Fax -ne $gradyr) {
-                    if (@(2,4,6) -contains $stuTemplate) {
+                    if (@(2,4,6,7,8) -contains $stuTemplate) {
                         Write-Host "Staging: $($studentId) This account has a different graduation year than before. This account will be renamed to reflect the graduation year change." -ForegroundColor Green
                     }
                 }
@@ -973,22 +1096,18 @@ $studentsCSV | ForEach-Object {
 
         if ($VerboseStudent) { Write-Host "Verbose: Account already exists for $($fullname)." -ForegroundColor Yellow }
 
-        if ($StopAfterXExisting -ge 1) {
-            $existingAccountsCount++
-            if ($existingAccountsCount -gt $StopAfterXExisting) {
-                Write-Host "Info: Threshold of $StopAfterXExisting on processing existing accounts has been met. Breaking from modifying students."
-                break
-            }
-        }
-
         #Enable Account if Disabled (returning student)
 	    if ($existingAccount.Enabled -eq $False) {
             try {
                 Write-Host "Info: Enabling account $($existingAccount.'DistinguishedName')" -ForeGroundColor Yellow
                 Set-AdAccountPassword -Identity $existingAccountGUID -Reset -NewPassword (ConvertTo-SecureString "$password" -AsPlainText -Force)
+                Invoke-SqlUpdate -Query "REPLACE INTO passwords (Student_id, Student_password, HAC_passwordset, Timestamp) VALUES ($studentid,""$password"",NULL,$timestamp)" | Out-Null
                 Set-AdUser -Identity $existingAccountGUID -ChangePasswordAtLogon $False
                 Set-ADAccountControl -Identity $existingAccountGUID -CannotChangePassword $False
                 Enable-ADAccount -Identity $existingAccountGUID
+
+                #Log Event Enable
+                Invoke-SqlUpdate -Query "INSERT INTO action_log (Student_id, Identity, Action, Timestamp) VALUES ($studentid,""$($existingAccount.UserPrincipalName)"",""Enable"",""$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"")" | Out-Null
 
                 if ($sendMailNotifications) {
 
@@ -1024,23 +1143,18 @@ $studentsCSV | ForEach-Object {
         }
         
         #If you use a student graduation year as part of their username, and their grade changes, do you want the account renamed?
-        if ($stuGradYrRename) {
+        if ($stuGradYrRename -and (-Not($DisableRenamingAccounts))) {
             #if ($existingAccount.Fax -ne $gradyr) { #If a student is returning and their gradyr wasn't in the .Fax field it caused a failure. So we need to actually check the username.
             if ( ($($existingAccount.UserPrincipalName).Substring($($($existingAccount.UserPrincipalName).Split('@')[0]).Length - 2,2)) -ne $([string]$gradyr).Substring(2,2) ) {
-                if (@(2,4,6,7) -contains $stuTemplate) {
+                if (@(2,4,6,7,8) -contains $stuTemplate) {
                     $existingAccount.surname = '' #Changing the name will force a rename in the next code block which should fix the gradyr change.
                 }
             }
         }
 
         #Rename Account if name mismatch. Only on Firstname and Given name as username may change on duplicate.
-        if (($existingAccount.GivenName -ne "$givenName")`
-         -or ($existingAccount.surname -ne "$surName")`
-         #-or ($existingAccount.displayname -ne "$fullname")`
-         #-or ($existingAccount.name -ne "$principalName")`
-         #-or ($existingAccount.SamAccountName -ne "$username")`
-         #-or ($existingAccount.Mail -ne "$emailAddress")`
-        ) {
+        if ((($existingAccount.GivenName -ne "$givenName")`
+         -or ($existingAccount.surname -ne "$surName")) -and (-Not($DisableRenamingAccounts))) {
             Write-Host "Notify: Name change detected. Updating $($existingAccount.'samaccountname') to $($username)"
 
             #Test if new account name is available.
@@ -1072,6 +1186,9 @@ $studentsCSV | ForEach-Object {
                 -EmailAddress $emailAddress `
 
                 Rename-ADObject -Identity $existingAccountGUID -NewName $principalName
+
+                #Log Event Rename
+                Invoke-SqlUpdate -Query "INSERT INTO action_log (Student_id, Identity, Action, Timestamp) VALUES ($studentid,""$($existingAccount.SamAccountName) to $principalName"",""Rename"",""$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"")" | Out-Null
 
                 #move home directory
                 if ($homedir) {
@@ -1107,7 +1224,7 @@ $studentsCSV | ForEach-Object {
                 }
 
             } catch {
-                Write-Host "Error: Failed to rename $oldName to $username"
+                Write-Host "Error: Failed to rename $oldName to $username. $PSItem"
                 $errorCount++
                 $errorMessage += @("Error: Failed to rename $oldName to $username")
                 return
@@ -1123,15 +1240,19 @@ $studentsCSV | ForEach-Object {
         
         $existingOU = $($($existingAccount.DistinguishedName).split(',')[1..($($existingAccount.DistinguishedName).Length -1 )] -join ',')
 
-        #Check if account is in the restricted OU.
-        if ($existingOU -like "*OU=Restricted*") {
-            #if current Restricted OU is not like the calculated OU then we have to assume a building change.
-            if ($ou -notlike "*$(($existingAccount.DistinguishedName).split(',')[(($($existingAccount.DistinguishedName).Split(',').indexof('OU=Restricted'))+1)..($($existingAccount.DistinguishedName).Split(',').Length)] -join ',')") {
-                #Set $ou to the new building but keep it in the restricted OU for the new building.
-                $ou = "OU=Restricted,$($($ou).split(',')[1..($($ou).Length -1 )] -join ',')"
-            } else {
-                $ou = $existingOU
-                Write-Host "Info: Not moving student $($existingAccount.DistinguishedName) from Restricted OU."
+        #Check if account is in any of the special OUs that we don't move students out of.
+        if ($specialOUs) {
+            $specialOUs | ForEach-Object {
+                if ($existingOU -like "*OU=$($PSItem)*") {
+                    #if current Restricted OU is not like the calculated OU then we have to assume a building change.
+                    if ($ou -notlike "*$(($existingAccount.DistinguishedName).split(',')[(($($existingAccount.DistinguishedName).Split(',').indexof('OU=$($PSItem)'))+1)..($($existingAccount.DistinguishedName).Split(',').Length)] -join ',')") {
+                        #Set $ou to the new building but keep it in the restricted OU for the new building.
+                        $ou = "OU=$($PSItem),$($($ou).split(',')[1..($($ou).Length -1 )] -join ',')"
+                    } else {
+                        $ou = $existingOU
+                        #Write-Host "Info: Not moving student $($existingAccount.DistinguishedName) from $($PSItem) OU."
+                    }
+                }
             }
         }
 
@@ -1197,20 +1318,20 @@ $studentsCSV | ForEach-Object {
 
         $homeDirRoot = $null; $homeDirPath = $null; $homeDir = $null
 
+        if ($StopAfterXExisting -ge 1) {
+            $existingAccountsCount++
+            if ($existingAccountsCount -ge $StopAfterXExisting) {
+                Write-Host "Info: Threshold of $StopAfterXExisting on processing existing accounts has been met. Breaking from modifying students."
+                break
+            }
+        }
+        
     } else {
         #we need to create a new account for the student. If we have a conflict we need to decide how to cope with it.
         #if ($staging) { Write-Host "Staging: Create an account for $username, $fullname, $gradyr, $buildingShortName, at $ou" -ForeGroundColor Yellow }
 
         if ($SkipNewStudents) { return }
         if ($VerboseStudent) { Write-Host "Info: Need to verify we can create a new account for $username, $fullname, $gradyr, $buildingShortName, at $ou" -ForeGroundColor Yellow }
-
-        if ($StopAfterXNew -ge 1) {
-            $newAccountsCount++
-            if ($newAccountsCount -gt $StopAfterXNew) {
-                Write-Host "Info: Threshold of $StopAfterXNew on processing new accounts has been met. Breaking from modifying students."
-                break
-            }
-        }
 
         #need to find out if the username is already taken by another user.
         if ($(Get-AdUser -Filter "(SamAccountName -eq ""$($username)"") -or (UserPrincipalName -eq ""$($principalName)"")")) {
@@ -1280,7 +1401,21 @@ $studentsCSV | ForEach-Object {
                 
                 #We need the email address to exist in Google before we create and set the password otherwise the Google Account will be locked out and miss the GAPS sync.
                 if ($GAMprecreateUser) {
-                    & $currentPath\..\gam\gam.exe create user $emailAddress
+                    if (-Not($GAMDefaultOrg)) { $GAMDefaultOrg = '/' }
+                    & $currentPath\..\gam\gam.exe create user $emailAddress firstname "$givenName" lastname "$surName" org "$GAMDefaultOrg"
+                    if ($LASTEXITCODE -eq 57) {
+                        Write-Host "Error: Failed to precreate user $emailAddress in Google G Workspaces due to duplicate."
+                        if ($GAMStopOnDuplicate) {
+                            $errorCount++
+                            $errorMessage += @("Error: Failed to precreate user $emailAddress in Google G Workspaces due to duplicate.")
+                            return
+                        }
+                    } elseif ($LASTEXITCODE -ge 1) {
+                        Write-Host "Error: Failed to precreate user $emailAddress in Google G Workspaces."
+                        $errorCount++
+                        $errorMessage += @("Error: Failed to precreate user $emailAddress in Google G Workspaces.")
+                        return
+                    }
                 }
 
                 New-Aduser `
@@ -1299,6 +1434,11 @@ $studentsCSV | ForEach-Object {
                 -Fax $gradyr `
                 -EmailAddress $emailAddress `
                 -UserPrincipalName $principalName `
+
+                Invoke-SqlUpdate -Query "REPLACE INTO passwords (Student_id, Student_password, HAC_passwordset, Timestamp) VALUES ($studentid,""$password"",NULL,$timestamp)" | Out-Null
+                
+                #Log Event Create
+                Invoke-SqlUpdate -Query "INSERT INTO action_log (Student_id, Identity, Action, Timestamp) VALUES ($studentid,""$principalName"",""Create"",""$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"")" | Out-Null
 
                 if ($sendMailNotifications) {
 
@@ -1346,7 +1486,7 @@ $studentsCSV | ForEach-Object {
             
             $homeDirRoot = $null; $homeDirPath = $null; $homeDir = $null
         } catch {
-            Write-Host "Error: Failed to create account for $($fullName), $($username), $($password), at $($ou). Try running script again in case this is a duplicate user error." -ForegroundColor Red
+            Write-Host "Error: Failed to create account for $($fullName), $($username), $($password), at $($ou). Try running script again in case this is a duplicate user error. $PSitem" -ForegroundColor Red
             Write-Host $Error[0].Exception.GetType().fullname
             $homeDirRoot = $null; $homeDirPath = $null; $homeDir = $null
             $errorCount++
@@ -1354,6 +1494,14 @@ $studentsCSV | ForEach-Object {
             return
         }
         
+        if ($StopAfterXNew -ge 1) {
+            $newAccountsCount++
+            if ($newAccountsCount -ge $StopAfterXNew) {
+                Write-Host "Info: Threshold of $StopAfterXNew on processing new accounts has been met. Breaking from modifying students."
+                break
+            }
+        }
+
     }
 
 }
@@ -1614,9 +1762,62 @@ if ($errorCount -ge 1) {
 # Final Script to do all the stuff.
 if (-Not($DisablePostProcessingScript)) {
     if (-Not($Staging)) {
-        if (Test-Path $currentPath\x_PostProcessingAutomatedStudents.ps1) {
-            . $currentPath\x_PostProcessingAutomatedStudents.ps1
+        
+        #QuickMode requires that we loop back and run this all again so we can get the enrollments and other data built then continue as normal.
+        if ($QuickMode) {
+            Write-Host "Info: QuickMode has been specified. We can not continue until we build the database with enrollment data. Running automated_database.ps1 again. Then we will continue."
+            Start-Process -FilePath "pwsh.exe" -ArgumentList "-f $currentPath\automated_database.ps1 -DisablePostProcessingScript" -NoNewWindow -Wait
         }
+
+        #Process Post Processing Scripts
+        $PostProcessingScripts = Get-ChildItem -Filter PostProcessingScripts\*.ps1 | Select-Object -ExpandProperty name
+
+        #ASynchronous First
+        Write-Host "Info: Starting ASynchronous Post Processing Tasks." -ForegroundColor Yellow
+        $PostProcessingScripts | Where-Object { $PSItem -notlike "sync_*.ps1" -and $PSItem -notlike "last_*.ps1" -and $PSItem -notlike "disabled_*.ps1" } | ForEach-Object {
+            Write-Host "Info: Running $PSItem" -ForegroundColor Yellow
+            Invoke-Expression -Command "& "".\PostProcessingScripts\$PSItem"""
+        }
+
+        #Synchronous Next
+        if (-Not($DisableRunningSyncronous)) {
+            Write-Host "Info: Starting Synchronous Post Processing Tasks. There will be no output until completed." -ForegroundColor Yellow
+            $SynchronousJos = $PostProcessingScripts | Where-Object { $PSItem -like "sync_*.ps1" } | ForEach-Object -Parallel {
+                #Dot source settings and functions for use in synchronous  scripts.
+                $domain = $using:domain
+                . .\settings.ps1
+                . .\z_functions.ps1
+                Import-Module SimplySQL
+                Connect-Database -database $database
+                Invoke-Expression -Command "& "".\PostProcessingScripts\$PSItem"""
+            } -ThrottleLimit 5 -AsJob | Wait-Job
+
+            $SynchronousJos.ChildJobs | Where-Object { $PSItem.State -eq "Completed" } | Receive-Job
+
+            #Output any failed jobs information.
+            $failedJobs = $SynchronousJos.ChildJobs | Where-Object { $PSItem.State -ne "Completed" }
+            $failedJobs | ForEach-Object {
+                $PSItem | Receive-Job
+            }
+
+            if (($failedJobs | Measure-Object).count -ge 1) {
+                Write-Host "Failed running", (($failedJobs | Measure-Object).count), "jobs." -ForegroundColor RED
+            }
+        } else {
+            Write-Host "Info: Starting Synchronous Post Processing Tasks as ASynchronous per the -DisableRunningSyncronous switch" -ForegroundColor Yellow
+            $PostProcessingScripts | Where-Object { $PSItem -like "sync_*.ps1" } | ForEach-Object {
+                Write-Host "Info: Running $PSItem" -ForegroundColor Yellow
+                Invoke-Expression -Command "& "".\PostProcessingScripts\$PSItem"""
+            }
+        }
+
+        #Last Last
+        Write-Host "Info: Starting ASynchronous Last Post Processing Tasks." -ForegroundColor Yellow
+        $PostProcessingScripts | Where-Object { $PSItem -like "last_*.ps1" } | ForEach-Object {
+            Write-Host "Info: Running $PSItem" -ForegroundColor Yellow
+            Invoke-Expression -Command "& "".\PostProcessingScripts\$PSItem"""
+        }
+
     } else {
         Write-Host "Info: Staging specified. Will not run x_PostProcessingAutomatedStudents.ps1."
     }

@@ -8,16 +8,16 @@
 #$existingAccountGUID - references the GUID of the existing user account regardless of name chnages that might have happenend prior to this script launching.
 
 #Set SIS Number to EmployeeID field in AD.
-if (-Not($Staging)) {
-    if (($existingAccount.EmployeeID -ne $PSItem.State_id) -and ($PSItem.State_id -gt 1)) {
-        Set-ADUser -Identity $existingAccountGUID -EmployeeID $PSItem.State_id
-    }
-}
+# if (-Not($Staging)) {
+#     if (($existingAccount.EmployeeID -ne $PSItem.State_id) -and ($PSItem.State_id -gt 1)) {
+#         Set-ADUser -Identity $existingAccountGUID -EmployeeID $PSItem.State_id
+#     }
+# }
 
 #Custom Home Directory Drive and Logon Script
-if (($existingAccount.HomeDrive -ne "S:") -or ($existingAccount.ScriptPath -ne "logon.bat")) {
-    Set-ADUser -Identity $existingAccountGUID -HomeDrive "S:" -ScriptPath "logon.bat"
-}
+# if (($existingAccount.HomeDrive -ne "S:") -or ($existingAccount.ScriptPath -ne "logon.bat")) {
+#     Set-ADUser -Identity $existingAccountGUID -HomeDrive "S:" -ScriptPath "logon.bat"
+# }
 
 #Students Moved into the buildings 16 and 13 shouldn't be able to change thier password.
 #The additional if statements are to limit the number of changes. Otherwise we overwhelm our DCs.
@@ -37,6 +37,10 @@ if (($existingAccount.HomeDrive -ne "S:") -or ($existingAccount.ScriptPath -ne "
 if ($ResetAllPasswords) {
 
     write-host "Updating password for $fullName, $gradyr, $buildingNumber"
+
+    #Insert new password into the database.
+    Invoke-SqlQuery -Query "REPLACE INTO passwords (Student_id, Student_password, HAC_passwordset, Timestamp) VALUES ($studentid,""$password"",NULL,$timestamp)"
+
     if ($staging) {     
         Set-AdAccountPassword -Identity $existingAccountGUID -Reset -NewPassword (ConvertTo-SecureString "$password" -AsPlainText -Force) -WhatIf
         Set-AdUser -Identity $existingAccountGUID -ChangePasswordAtLogon $False -WhatIf
@@ -47,7 +51,8 @@ if ($ResetAllPasswords) {
         Set-ADAccountControl -Identity $existingAccountGUID -CannotChangePassword $False
     }
     
-    #place password string in a variable to be written after processing all students. This is much faster and doesn't run into file locks.
-    $passwordhashtable.$buildingShortName += "$($studentId),$($fullName),$($emailAddress),$($password)`r`n"
-    
 }
+
+# Sample of adding an expiration in the future. If you turn off disabling accounts this is a good way to allow for accounts to be automatically disabled in the future. You need a
+# post processing script to disable expired accounts.
+# Set-ADAccountExpiration -Identity $existingAccountGUID -DateTime (Get-Date).AddDays(3)

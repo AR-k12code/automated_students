@@ -15,3 +15,4 @@ function Get-NewPassword($student) {
 
     return $newPassword
 }
+

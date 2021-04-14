@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<config version="4.7.6" id="6df3b24ca9cf42ab8b074efb88eb159f" rev="803b085494d1490b879edf7d12c86226" marker="314">
+<config version="4.7.6" id="021625fb35d647cc81c5e5274e27bc28" rev="f8fd8b63e90d4e20acd55d0d1538a499" marker="314">
   <features>
     <optional>ALIAS_SYNCHRONIZATION</optional>
     <optional>BASE64_PASSWORD</optional>
@@ -7,7 +7,9 @@
     <optional>GIVEN_NAME</optional>
     <optional>GOOGLE_ORGUNITS</optional>
     <optional>GOOGLE_QUOTA</optional>
+    <optional>GROUPS</optional>
     <optional>GROUP_DESCRIPTION</optional>
+    <optional>GROUP_MANAGER_POLICY_SYNC</optional>
     <optional>GROUP_OWNER</optional>
     <optional>MD5_PASSWORD</optional>
     <optional>MULTIDOMAIN</optional>
@@ -16,26 +18,25 @@
     <optional>SKIP_CALENDAR_RESOURCES</optional>
     <optional>SKIP_CUSTOM_SCHEMAS</optional>
     <optional>SKIP_EXISTING_PASSWORDS</optional>
-    <optional>SKIP_GROUPS</optional>
     <optional>SKIP_IDENTITY_MAPPED_GROUPS</optional>
     <optional>SKIP_LICENSES</optional>
     <optional>SKIP_SHARED_CONTACTS</optional>
     <optional>SKIP_SUSPENDING_ADMINS</optional>
-    <optional>USER_PROFILES</optional>
     <optional>SUSPEND_USERS</optional>
+    <optional>USER_PROFILES</optional>
   </features>
   <logging>
     <defaultLogLevel>INFO</defaultLogLevel>
     <format>[%d{ISO8601}%d{Z}] [%t] [%p] [%C{3}] %m%n</format>
-    <logFile>C:\Users\username\sync-users.log</logFile>
+    <logFile>C:\scripts\gcds\gentrysms.log</logFile>
     <maximumLogBytes>1073741824</maximumLogBytes>
     <logFileCount>1</logFileCount>
   </logging>
   <notification>
     <smtpRelay>smtp-relay.gmail.com</smtpRelay>
     <useSmtpTLS>true</useSmtpTLS>
-    <fromAddress>noreply@samplefacultydomain.com</fromAddress>
-    <toAddress>technology@samplefacultydomain.com</toAddress>
+    <fromAddress>noreply@facultydomain.com</fromAddress>
+    <toAddress>technology@facultydomain.com</toAddress>
     <useAttachment>true</useAttachment>
     <ignoreRetrievalInfo>false</ignoreRetrievalInfo>
     <ignoreRetrievalWarnings>false</ignoreRetrievalWarnings>
@@ -44,11 +45,13 @@
   <eventLimits>
     <deleteLimitPCT_CALENDAR_RESOURCE>5</deleteLimitPCT_CALENDAR_RESOURCE>
     <deleteLimitCount_GROUP>1000</deleteLimitCount_GROUP>
+    <modifyLimitPCT_GROUP>50</modifyLimitPCT_GROUP>
     <deleteLimitPCT_IDENTITY_MAPPED_GROUP>5</deleteLimitPCT_IDENTITY_MAPPED_GROUP>
     <deleteLimitPCT_ORG_UNIT>5</deleteLimitPCT_ORG_UNIT>
     <deleteLimitPCT_SHARED_CONTACT>5</deleteLimitPCT_SHARED_CONTACT>
     <deleteLimitCount_USER>50</deleteLimitCount_USER>
     <suspendLimitCount_USER>500</suspendLimitCount_USER>
+    <modifyMinimumMemberGroupLimit>100</modifyMinimumMemberGroupLimit>
   </eventLimits>
   <!--cache lifetime specified in seconds, default value is 8 days -->
   <maxCacheLifetime>691200</maxCacheLifetime>
@@ -58,7 +61,7 @@
   <plugins>
     <plugin class="com.google.usersyncapp.plugin.google.GooglePlugin">
       <config version="0.2">
-        <domain>samplefacultydomain.com</domain>
+        <domain>gentrypioneers.com</domain>
         <loginMethod>OAUTH2</loginMethod>
         <oAuth2RefreshToken>PljK+ybpm2MlhvBeqbbaQKB6qBzzgN3FH3C0vuA8dWnP+wugqqX5N+orA+kDG4OD</oAuth2RefreshToken>
         <oAuth2Scopes>
@@ -94,67 +97,67 @@
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>technology@samplefacultydomain.com</filter>
+          <filter>technology@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>newspaper@samplefacultydomain.com</filter>
+          <filter>newspaper@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>support@samplefacultydomain.com</filter>
+          <filter>support@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>printer-admin@samplefacultydomain.com</filter>
+          <filter>printer-admin@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>transportationipad@samplefacultydomain.com</filter>
+          <filter>transportationipad@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>smclass@samplestudentdomain.com</filter>
+          <filter>smclass@studentdomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>gentrystudentadmin@samplestudentdomain.com</filter>
+          <filter>gentrystudentadmin@studentdomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>announcements@samplefacultydomain.com</filter>
+          <filter>announcements@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>noreply@samplefacultydomain.com</filter>
+          <filter>noreply@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>a@samplefacultydomain.com</filter>
+          <filter>a@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>rostersync@samplefacultydomain.com</filter>
+          <filter>rostersync@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>gms-boosters@samplefacultydomain.com</filter>
+          <filter>gms-boosters@facultydomain.com</filter>
         </exclude>
         <exclude>
           <match>USER_NAME</match>
           <type>EXACT</type>
-          <filter>fccare@samplefacultydomain.com</filter>
+          <filter>fccare@facultydomain.com</filter>
         </exclude>
       </config>
     </plugin>
@@ -162,15 +165,15 @@
       <config version="0.2">
         <serverType>ACTIVE_DIRECTORY</serverType>
         <connectMethod>STANDARD</connectMethod>
-        <hostname>10.0.0.1</hostname>
+        <hostname>10.64.4.1</hostname>
         <port>389</port>
-        <basedn>dc=sample,dc=local</basedn>
+        <basedn>dc=mydomain,dc=com</basedn>
         <authType>SIMPLE</authType>
-        <authUser>gcds-user</authUser>
-        <authCredentialsEncrypted></authCredentialsEncrypted>
+        <authUser>gads-user</authUser>
+        <authCredentialsEncrypted>ILlIu52JD9cj0XZG+3R8SxoLc4N4fcg9OXxI46WIC5I=</authCredentialsEncrypted>
         <nonAddressPrimaryKeyAttrName>objectGUID</nonAddressPrimaryKeyAttrName>
         <emailAttrName>mail</emailAttrName>
-        <ldapCredMachineName>TECH-VIRTUAL</ldapCredMachineName>
+        <ldapCredMachineName>MACHINE</ldapCredMachineName>
         <dominoWhiteSpaceReplaceChar>.</dominoWhiteSpaceReplaceChar>
         <givenNameAttrName>givenName</givenNameAttrName>
         <familyNameAttrName>sn</familyNameAttrName>
@@ -180,23 +183,23 @@
         <resultsPageSize>1000</resultsPageSize>
         <orgunits>
           <mapping>
-            <dn>ou=Students,dc=sample,dc=local</dn>
+            <dn>ou=Students,dc=mydomain,dc=com</dn>
             <name>Students</name>
           </mapping>
           <mapping>
-            <dn>ou=Faculty,dc=sample,dc=local</dn>
+            <dn>ou=Faculty,dc=mydomain,dc=com</dn>
             <name>Faculty</name>
           </mapping>
           <search>
             <priority>1</priority>
-            <basedn>ou=Students,dc=sample,dc=local</basedn>
+            <basedn>ou=Students,dc=mydomain,dc=com</basedn>
             <scope>SUBTREE</scope>
             <filter>objectClass=OrganizationalUnit</filter>
             <descriptionAttrName />
           </search>
           <search>
             <priority>2</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
+            <basedn>ou=Faculty,dc=mydomain,dc=com</basedn>
             <scope>SUBTREE</scope>
             <filter>objectClass=OrganizationalUnit</filter>
             <descriptionAttrName />
@@ -204,113 +207,42 @@
           <exclude>
             <match>ORGUNIT_DN</match>
             <type>EXACT</type>
-            <filter>ou=Schedule Groups,ou=Students,dc=sample,dc=local</filter>
+            <filter>ou=Schedule Groups,ou=Students,dc=mydomain,dc=com</filter>
           </exclude>
         </orgunits>
         <users>
           <search>
             <priority>1</priority>
-            <basedn>ou=Students,dc=sample,dc=local</basedn>
+            <basedn>ou=Students,dc=mydomain,dc=com</basedn>
             <suspended>false</suspended>
             <scope>SUBTREE</scope>
             <orgMappingAttribute />
-            <filter>(&amp;(mail=*@samplestudentdomain.com)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))</filter>
+            <filter>(&amp;(mail=*@studentdomain.com)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))</filter>
           </search>
           <search>
             <priority>2</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
+            <basedn>ou=Faculty,dc=mydomain,dc=com</basedn>
             <suspended>false</suspended>
             <scope>SUBTREE</scope>
             <orgMappingAttribute />
-            <filter>(&amp;(mail=*@samplefacultydomain.com)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))</filter>
+            <filter>(&amp;(mail=*@facultydomain.com)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))</filter>
           </search>
         </users>
         <groups>
           <search>
             <priority>1</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
-            <scope>SUBTREE</scope>
-            <filter>mail=certified@samplefacultydomain.com</filter>
+            <basedn>ou=Faculty,dc=mydomain,dc=com</basedn>
+            <scope>ONELEVEL</scope>
+            <filter>(&amp;(objectCategory=Group)(mail=*@facultydomain.com))</filter>
             <memberAttrName>member</memberAttrName>
             <groupIdentifierAttr>mail</groupIdentifierAttr>
+            <ownerLiteralAttribute>wbemPath</ownerLiteralAttribute>
           </search>
           <search>
             <priority>2</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
+            <basedn>ou=Students,dc=mydomain,dc=com</basedn>
             <scope>SUBTREE</scope>
-            <filter>mail=allstaff@samplefacultydomain.com</filter>
-            <memberAttrName>member</memberAttrName>
-            <groupIdentifierAttr>mail</groupIdentifierAttr>
-          </search>
-          <search>
-            <priority>3</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
-            <scope>SUBTREE</scope>
-            <filter>mail=classified@samplefacultydomain.com</filter>
-            <memberAttrName>member</memberAttrName>
-            <groupIdentifierAttr>mail</groupIdentifierAttr>
-          </search>
-          <search>
-            <priority>4</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
-            <scope>SUBTREE</scope>
-            <filter>mail=technologydepartment@samplefacultydomain.com</filter>
-            <memberAttrName>member</memberAttrName>
-            <groupIdentifierAttr>mail</groupIdentifierAttr>
-          </search>
-          <search>
-            <priority>5</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
-            <scope>SUBTREE</scope>
-            <filter>mail=hsfaculty@samplefacultydomain.com</filter>
-            <memberAttrName>member</memberAttrName>
-            <groupIdentifierAttr>mail</groupIdentifierAttr>
-          </search>
-          <search>
-            <priority>6</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
-            <scope>SUBTREE</scope>
-            <filter>mail=msfaculty@samplefacultydomain.com</filter>
-            <memberAttrName>member</memberAttrName>
-            <groupIdentifierAttr>mail</groupIdentifierAttr>
-          </search>
-          <search>
-            <priority>7</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
-            <scope>SUBTREE</scope>
-            <filter>mail=isfaculty@samplefacultydomain.com</filter>
-            <memberAttrName>member</memberAttrName>
-            <groupIdentifierAttr>mail</groupIdentifierAttr>
-          </search>
-          <search>
-            <priority>8</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
-            <scope>SUBTREE</scope>
-            <filter>mail=psfaculty@samplefacultydomain.com</filter>
-            <memberAttrName>member</memberAttrName>
-            <groupIdentifierAttr>mail</groupIdentifierAttr>
-          </search>
-          <search>
-            <priority>9</priority>
-            <basedn>ou=Schedule Groups,ou=Students,dc=sample,dc=local</basedn>
-            <scope>SUBTREE</scope>
-            <filter>mail=*@samplestudentdomain.com</filter>
-            <memberAttrName>member</memberAttrName>
-            <groupIdentifierAttr>mail</groupIdentifierAttr>
-          </search>
-          <search>
-            <priority>10</priority>
-            <basedn>ou=Faculty,dc=sample,dc=local</basedn>
-            <scope>SUBTREE</scope>
-            <filter>mail=transportation@samplefacultydomain.com</filter>
-            <memberAttrName>member</memberAttrName>
-            <groupIdentifierAttr>mail</groupIdentifierAttr>
-          </search>
-          <search>
-            <priority>11</priority>
-            <basedn>ou=Students,dc=sample,dc=local</basedn>
-            <scope>ONELEVEL</scope>
-            <filter>mail=*@samplestudentdomain.com</filter>
+            <filter>(&amp;(objectCategory=Group)(mail=*@studentdomain.com))</filter>
             <memberAttrName>member</memberAttrName>
             <groupIdentifierAttr>mail</groupIdentifierAttr>
             <ownerLiteralAttribute>wbemPath</ownerLiteralAttribute>
@@ -325,18 +257,18 @@
         <userProfiles>
           <search>
             <priority>1</priority>
-            <basedn>ou=Students,dc=sample,dc=local</basedn>
+            <basedn>ou=Students,dc=mydomain,dc=com</basedn>
             <scope>SUBTREE</scope>
             <departmentAttrName>HomePhone</departmentAttrName>
             <buildingIdAttrName>physicalDeliveryOfficeName</buildingIdAttrName>
             <primaryEmailAddressAttrName>mail</primaryEmailAddressAttrName>
             <employeeIdsAttrName>EmployeeNumber</employeeIdsAttrName>
-            <filter>(&amp;(mail=*@samplestudentdomain.com)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))</filter>
+            <filter>(&amp;(mail=*@studentdomain.com)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))</filter>
           </search>
           <exclude>
             <match>PRIMARY_SYNC_KEY</match>
             <type>SUBSTRING</type>
-            <filter>*@samplefacultydomain.com</filter>
+            <filter>*@facultydomain.com</filter>
           </exclude>
         </userProfiles>
         <calendarResources>

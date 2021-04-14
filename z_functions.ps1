@@ -98,7 +98,11 @@ function Grant-PasswordResetOnOU ($group, $ou) {
 Function Get-NextAvailableUsername ($username, $principalName, $homeDirGradYR, $firstName, $lastName, $middleInitial) {
     #we already know there is a conflict.
     #we need another function to generate usernames so we can pass it to that as many times as needed.
+    $firstName = Remove-SpecialCharacters(Remove-Spaces($firstName))
+    $lastName = Remove-SpecialCharacters(Remove-Spaces($lastName))
+
     $newUser = @{}
+    $principalDomain = $principalName.split('@')[1]
     
     if ($middleInitial.length -eq 1) {
         #first lets try adding the middle initial. #this is going to have to be done with a replace.
@@ -119,7 +123,14 @@ Function Get-NextAvailableUsername ($username, $principalName, $homeDirGradYR, $
                 }
             }
         }
-        $newUser.'principalName' = $principalName -replace "$firstName","$($firstName)$($middleInitial)"
+        
+        #Student Template 7 & 8 do not use the full name and will always fit inside the 20 characters. This means we can use the generated username for the userprincipal as it will ALWAYS match.
+        if (@(7,8) -contains $stuTemplate) {
+            $newUser.'principalName' = $($newUser.'username') + $principalDomain
+        } else {
+            $newUser.'principalName' = $principalName -replace "$firstName","$($firstName)$($middleInitial)"
+        }
+
         $newUser.'homeDir' = "$($homeDirGradYR)\$($newUser.'username')"
         #write-host "We should return $($newUser.'username') back to the main script."
         #now test and return
@@ -162,8 +173,14 @@ Function Get-NextAvailableUsername ($username, $principalName, $homeDirGradYR, $
                 }
             }
         }
+        
+        #Student Template 7 & 8 do not use the full name and will always fit inside the 20 characters. This means we can use the generated username for the userprincipal as it will ALWAYS match.
+        if (@(7,8) -contains $stuTemplate) {
+            $newUser.'principalName' = $($newUser.'username') + $principalDomain
+        } else {
+            $newUser.'principalName' = $principalName -replace "$lastName","$($lastName)$([string]$i)"
+        }
 
-        $newUser.'principalName' = $principalName -replace "$lastName","$($lastName)$([string]$i)"
         $newUser.'homeDir' = "$($homeDirGradYR)\$($newUser.'username')"
         #now test and return
         #if ($(Get-AdUser -Filter "(SamAccountName -eq ""$($newUser.'username')"")") -or $(Get-AdUser -Filter "(UserPrincipalName -eq ""$($newUser.'principalName')"")")) {
@@ -189,7 +206,10 @@ function Add-ToADGroup ([String]$group,[Array]$users) {
     }
 
     $members = @()
-    Get-ADGroupMember -Identity $group | Select-Object SamAccountName | ForEach-Object { $members += $PSItem.'SamAccountName' }
+    #Fix for Groups Larger than Get-ADGroupMember can support.
+    $groupDistinguishedName = Get-ADGroup -Identity $group | Select-Object -ExpandProperty DistinguishedName
+    Get-ADUser -LDAPFilter "(&(objectCategory=user)(memberof=$($groupDistinguishedName)))" | Select-Object -Property SamAccountName | ForEach-Object { $members += $PSItem.'SamAccountName' }
+    #Get-ADGroupMember -Identity $group | Select-Object SamAccountName | ForEach-Object { $members += $PSItem.'SamAccountName' }
 
     foreach ($i in $users) {
         #write-host "Checking if $i is in $group"
@@ -215,7 +235,10 @@ function Set-ADGroupMembershipOnly ([String]$group,[Array]$users=@(),[Array]$exc
     # }
     
     $members = @()
-    Get-ADGroupMember -Identity $group | Select-Object -Property SamAccountName | Where-Object { $members += $PSItem.'SamAccountName' }
+    #Fix for Groups Larger than Get-ADGroupMember can support.
+    $groupDistinguishedName = Get-ADGroup -Identity $group | Select-Object -ExpandProperty DistinguishedName
+    Get-ADUser -LDAPFilter "(&(objectCategory=user)(memberof=$($groupDistinguishedName)))" | Select-Object -Property SamAccountName | ForEach-Object { $members += $PSItem.'SamAccountName' }
+    #Get-ADGroupMember -Identity $group | Select-Object -Property SamAccountName | Where-Object { $members += $PSItem.'SamAccountName' }
 
     $removemembers = $members | Where-Object { $users -notcontains $PSItem }
     $removemembers = $removemembers | Where-Object { $excluded -notcontains $PSItem }
@@ -237,7 +260,7 @@ function Set-ADGroupMembershipOnly ([String]$group,[Array]$users=@(),[Array]$exc
 
 }
 
-#Set the Ownership in the WBEMPath field for Groups.
+#Set the Ownership in the WBEMPath field for Groups. #Pretty sure this is wrong and not used!
 function Set-ADGroupOwnershipOnly ([String]$group,[string]$buildingShortName,[string]$grade) {
     
     Write-Host "Info: Verifying group ownership for $group"
@@ -250,7 +273,9 @@ function Set-ADGroupOwnershipOnly ([String]$group,[string]$buildingShortName,[st
     # }
     
     $members = @()
-    Get-ADGroupMember -Identity $group | Select-Object -Property SamAccountName | Where-Object { $members += $PSItem.'SamAccountName' }
+    $groupDistinguishedName = Get-ADGroup -Identity $group | Select-Object -ExpandProperty DistinguishedName
+    Get-ADUser -LDAPFilter "(&(objectCategory=user)(memberof=$($groupDistinguishedName)))" | Select-Object -Property SamAccountName | ForEach-Object { $members += $PSItem.'SamAccountName' }
+    #Get-ADGroupMember -Identity $group | Select-Object -Property SamAccountName | Where-Object { $members += $PSItem.'SamAccountName' }
 
     $removemembers = $members | Where-Object { $users -notcontains $PSItem }
     if ($($removemembers | Measure-Object).count -ge 1) {
@@ -294,28 +319,52 @@ function Send-EmailNotification ([array]$mailto = @(), [string]$subject, [string
 
     if (-Not($sendMailNotifications)) { Write-Host "Warning: Not configured to send email notifications."; return }
     
-    if ($smtpAuth) {
-
-        if (Test-Path ($smtpPasswordFile)) {
-            $smtpPassword = Get-Content $smtpPasswordFile | ConvertTo-SecureString
-        } else {
-            Write-Host("SMTP Password file does not exist! [$smtpPasswordFile]. Please enter the password to be saved on this computer for emails.") -ForeGroundColor Yellow
-            Read-Host "Enter Password" -AsSecureString |  ConvertFrom-SecureString | Out-File $smtpPasswordFile
-            $smtpPassword = Get-Content $smtpPasswordFile | ConvertTo-SecureString
-        }
-        $mailCredentials = New-Object -Type System.Management.Automation.PSCredential -ArgumentList $sendMailFrom, $smtpPassword
-
-        Send-MailMessage -From $sendMailFrom -to $mailto -Subject $subject `
-            -Body $body -SmtpServer $sendMailHost -port $sendMailPort -UseSsl `
-            -Credential $mailCredentials
+    if ($GAMprecreateUser) {
+        #GAM has been specified and should be used to send email as well.
+        $output = & gam.exe sendemail "$mailto" subject "$subject" message "$body"
+    
+        if ($LASTEXITCODE -ge 1 -OR $NULL -eq $output) { throw "Failed to Send Email via GAM." }
+                
     } else {
-        Send-MailMessage -From $sendMailFrom -to $mailto -Subject $subject `
-            -Body $body -SmtpServer $sendMailHost -port $sendMailPort -UseSsl
+        #Send email via SMTP.
+        if ($smtpAuth) {
+
+            if (Test-Path ($smtpPasswordFile)) {
+                $smtpPassword = Get-Content $smtpPasswordFile | ConvertTo-SecureString
+            } else {
+                Write-Host("SMTP Password file does not exist! [$smtpPasswordFile]. Please enter the password to be saved on this computer for emails.") -ForeGroundColor Yellow
+                Read-Host "Enter Password" -AsSecureString |  ConvertFrom-SecureString | Out-File $smtpPasswordFile
+                $smtpPassword = Get-Content $smtpPasswordFile | ConvertTo-SecureString
+            }
+            $mailCredentials = New-Object -Type System.Management.Automation.PSCredential -ArgumentList $sendMailFrom, $smtpPassword
+
+            Send-MailMessage -From $sendMailFrom -to $mailto -Subject $subject `
+                -Body $body -SmtpServer $sendMailHost -port $sendMailPort -UseSsl `
+                -Credential $mailCredentials
+        } else {
+            Send-MailMessage -From $sendMailFrom -to $mailto -Subject $subject `
+                -Body $body -SmtpServer $sendMailHost -port $sendMailPort -UseSsl
+        }
     }
 
 }
 
 function Get-NewPassword($student) {
+
+    if ($UseDinoPassSimple -OR $UseDinoPassStrong) {
+        try {
+            if ($UseDinoPassSimple) {
+                $dinoURL = "https://www.dinopass.com/password/simple"
+            } elseif ($UseDinoPassStrong) {
+                $dinoURL = "https://www.dinopass.com/password/strong"
+            }
+            $password = Invoke-RestMethod -Uri $dinoURL
+            return $password
+        } catch {
+            #do nothing and continue with the randomly generated below.
+        }
+    }
+
     $words = @('think','cabin','trust','funny','prize','model','study','great','shine','world','light','unity','clear','first','piano','power','salad','phone','truth','depth','queen','chest','tooth','basis','world','guest','apple','entry','hotel','bread','night','steak','owner','pizza','skill','ratio','media','month','bonus','honey','uncle','movie','river','shirt','cheek','paper','photo','actor','video','youth','error','thing','buyer','topic','event','scene','heart')
     $specials = @('.','!','-','$','@')
     $generatedpassword = "$(Get-Random -InputObject $words)$(Get-Random -InputObject $specials)" + "$($student.Student_id)".substring("$($student.Student_id)".length - 4, 4)
@@ -408,4 +457,236 @@ function Get-FNVHash {
 #Pull in custom/overriding functions.
 if (Test-Path $currentPath\z_functionsCustom.ps1) {
     . $currentPath\z_functionsCustom.ps1
+}
+
+#### Google Drive with GAM and rclone ####
+# Start-Process does not contain the output of a command. We can only get ExitCodes. $LAST
+# 
+# "$var = gam fakecommand" returns NULL and $LASTEXITCODE > 0 if failed.
+# "$var = rclone fakecommand" returns '[' and $LASTEXITCODE > 0 if failed.
+# Throw exception if either of these are true after an execution.
+#
+####
+
+Function New-GDriveAutomatedStudentsFolder {
+    try {
+        #This creates the folder if its missing. This does not fail if the folder already exist.
+        $result = & rclone.exe --config C:\Scripts\rclone\rclone.conf mkdir "google-drive:automated_students"
+        if ($LASTEXITCODE -ge 1) { throw }
+        return
+    } catch {
+        throw "Error: Can not run rclone to create automated student folder in Google Account $GoogleAccount."
+    }
+}
+Function Get-GDriveAutomatedStudentsFiles {    
+    $drivefiles = & rclone.exe --config C:\Scripts\rclone\rclone.conf lsjson "google-drive:automated_students/" -R #Get output from rclone
+    
+    try {
+        #test if output is json. if not a possible reason is because the folder doesn't exist. Try to create in the catch.
+        $conversion = $drivefiles | ConvertFrom-Json
+    } catch {
+        $NewAutomatedFolder = New-GDriveAutomatedStudentsFolder
+        $drivefiles = & rclone.exe --config C:\Scripts\rclone\rclone.conf lsjson "google-drive:automated_students/" -R #Get output from rclone
+        if ($LASTEXITCODE -ge 1) { Throw 'Could not run rclone to list files.' }
+    }
+       
+    #Convert from Json and remove XLSX extension from Sheet Files.
+    $drivefiles = $drivefiles | ConvertFrom-Json | Select-Object -Property ID,IsDir,ModTime,@{Name='Path';Expression={[string]$PSItem.'Path' -replace '.xlsx',''}},@{Name='Name';Expression={[string]$PSItem.'Name' -replace '.xlsx',''}}
+    return $drivefiles
+}
+
+
+Function Get-GDriveAutomatedStudentsFolderId {
+    try {
+        $drivefiles = & rclone.exe --config C:\Scripts\rclone\rclone.conf lsjson "google-drive:" --dirs-only --include "automated_students/" #Get root folder searching for specific folder.
+        if ($LASTEXITCODE -ge 1) { Write-Host "Error: Unable to list files using rclone using remote google-drive:" -ForegroundColor RED; Throw }
+
+        $drivefiles = $drivefiles | ConvertFrom-Json
+        $automatedFolder = $drivefiles | Where-Object { $PSItem.Path -eq "automated_students" -AND $PSItem.IsDir -eq "True" } | Select-Object -ExpandProperty ID
+        
+        if ($automatedFolder) {
+            return $automatedFolder
+        } else {
+            throw
+        }
+    } catch {
+        throw "Error: Problem finding Automated Students Folder."
+    }
+}
+
+Function Get-GDriveSheetId {
+    param (
+        [Parameter(Mandatory=$true)][string]$path, #Path to file. Do not include / at beggining or end.
+        [Parameter(Mandatory=$false)][switch]$DoNotCreateFile, #This requires the path provided to match otherwise throw error.
+        [Parameter(Mandatory=$false)][array]$GoogleDriveFiles, #You can send the response of Get-GdriveAutomatedStudentsFiles prior to calling this function in a loop.
+        [Parameter(Mandatory=$false)][string]$InitialIncomingData = 'AUTOMATICALLY CREATED BY THE AUTOMATED_STUDENTS PROJECT' #Initial Data to load when creating file for the first time.
+    )
+    #I'm about 100% certain this should be broken into a bunch of smaller Functions but for now it creates the sheet if it doesn't exist.
+
+    $path = $path -replace '\\','/' #The repsonse has forward slashes but by default on windows we use backslashes.
+
+    #use incoming $GoogleDriveFiles instead of running Get-GDriveAutomatedStudentsFiles
+    if ($GoogleDriveFiles) {
+        $drivefiles = $GoogleDriveFiles
+    } else {
+        $drivefiles = Get-GDriveAutomatedStudentsFiles
+    }
+
+    $result =  $drivefiles | Where-Object { $PSItem.Path -eq "$path" -AND $PSItem.IsDir -eq $False }
+
+    if ($result) {
+        #Return the first response. Google Drive supports the same File Name in the same folder but we can't honestly account for this.
+        return $result[0].'ID'
+    } else {
+
+        if ($DoNotCreateFile) { throw "File not found and not creating a new one in its place." }
+
+        #We need to check that the path exists first.
+        if (($path.split('/') | Measure-Object).count -gt 1) {
+            $pathSplit = $path.split('/') #split first.
+            $folders = $pathSplit[0..($pathSplit.length - 2)] #the folders to an array.
+            $folderPath = $folders -join '/' #leave just the path without the file.
+            $fileName = $pathSplit[$pathSplit.Length-1]
+
+            #if existing folder doesn't exit then make one.
+            if (-Not($drivefiles | Where-Object { $PSItem.Path -eq "$folderPath" -AND $PSItem.IsDir -eq "True" })) {
+                $newfolder = & rclone.exe --config C:\Scripts\rclone\rclone.conf mkdir "google-drive:automated_students/$($folderPath)"
+                if ($LASTEXITCODE -gt 1) { Write-Host "Error: Could not create folder $folderPath using rclone."; throw }
+            }
+        } else {
+            $fileName = $path #no folder so no need to split or check if folder exists
+            #$folderPath = This will be blank so it should put it at the root of the automated_students folder.
+        }
+
+        #Then we need to create a blank sheet Google Sheet at the provided path.
+        $InitialIncomingData | Out-File "$($env:temp)\$($fileName).csv" -Force
+        & rclone.exe --config C:\Scripts\rclone\rclone.conf copy "$($env:temp)\$($fileName).csv" "google-drive:automated_students/$($folderPath)" --drive-import-formats csv,xlsx --drive-allow-import-name-change
+        if ($LASTEXITCODE -ge 1) { Throw }
+
+        #$path; $fileName; $folderPath
+        Get-GDriveSheetId($path) -DoNotCreateFile
+
+    }
+}
+
+function Update-GoogleSheet {
+    param (
+        [Parameter(Mandatory=$true)][string]$SourcePath,
+        [Parameter(Mandatory=$true)][string]$TargetPath,
+        [Parameter(Mandatory=$false)][array]$GoogleDriveFiles,
+        [Parameter(Mandatory=$false)][string]$ShareWith
+    )
+    $TargetPath = $TargetPath -replace '\\','/' #The repsonse has forward slashes but by default on windows we use backslashes.
+    if ($NULL -eq $GoogleAccount) { throw "You must specify the Google Account to use for exporting Google Sheets." }
+    if (-Not(Test-Path $SourcePath)) { throw "The file $($SourcePath) can not be found." }
+    
+    if (($TargetPath.split('/') | Measure-Object).count -gt 1) {
+        $pathSplit = $TargetPath.split('/') #split first.
+        $fileName = $pathSplit[$pathSplit.Length-1]
+    } else {
+        $fileName = $TargetPath
+    }
+    
+    if ($GoogleDriveFiles) {
+        $output = & gam.exe user $GoogleAccount update drivefile id (Get-GDriveSheetId -path "$TargetPath" -GoogleDriveFiles $GoogleDriveFiles) localfile "$SourcePath" newfilename "$fileName" 
+    } else {
+        $output = & gam.exe user $GoogleAccount update drivefile id (Get-GDriveSheetId -path "$TargetPath") localfile "$SourcePath" newfilename "$fileName" 
+    }
+
+    if ($LASTEXITCODE -ge 1 -OR $NULL -eq $output) { throw "Failed to update sheet." }
+
+    if ($ShareWith) {
+        #This causes another index using rclone which might actually be a big problem.
+        $output += & gam user $GoogleAccount add drivefileacl (Get-GDriveSheetId -path "$TargetPath") user $teacher_email role reader #sendemail
+        if ($LASTEXITCODE -ge 1) { throw "Failed to share google sheet." }
+    }
+
+    return $output
+}
+
+function Update-GoogleSheetTimeStamp {
+    param (
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$false)][array]$GoogleDriveFiles
+    )
+    $Path = $Path -replace '\\','/' #The repsonse has forward slashes but by default on windows we use backslashes.
+    if ($NULL -eq $GoogleAccount) { throw "You must specify the Google Account to use for exporting Google Sheets." }
+        
+    if ($GoogleDriveFiles) {
+        $output = & gam.exe user $GoogleAccount update drivefile id (Get-GDriveSheetId -path "$Path" -GoogleDriveFiles $GoogleDriveFiles) modifieddate (Get-Date -Format o)
+    } else {
+        $output = & gam.exe user $GoogleAccount update drivefile id (Get-GDriveSheetId -path "$Path") modifieddate (Get-Date -Format o)
+    }
+
+    if ($LASTEXITCODE -ge 1 -OR $NULL -eq $output) { throw "Failed to update timestamp on sheet." }
+
+    return $output
+}
+
+function Connect-Database {
+    param (
+        [Parameter(Mandatory=$true)]$database #this could be a hashtable or a string.
+    )
+
+    #Default to SQLite
+    if ($database.GetType().Name -eq 'String') {
+        try {
+            Open-SQLiteConnection -DataSource $database
+            return $True
+        } catch {
+            return $False
+        }
+    }
+
+    $dbcredentials = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $database['username'],(ConvertTo-SecureString -AsPlainText "$($database['password'])" -Force)
+
+    #MySQL or MSSQL
+    if ($database.dbtype -eq 'mysql') {
+        try {
+            Open-MySqlConnection -Server $database.hostname -Database $database.dbname -Credential $dbcredentials
+            return $True
+        } catch {
+            return $False
+        }
+    } elseif ($database.dbtype -eq 'mssql') {
+        try {
+            Open-SqlConnection -Server $database.hostname -Database $database.dbname -UserName $database.username -Password $database.password
+            return $True
+        } catch {
+            return $False
+        }
+    }
+
+    #we should have returned something by now. Otherwise just return False.
+    return $False
+
+}
+
+Function Out-DataTable {
+  $dt = new-object Data.datatable  
+  $First = $true  
+ 
+  foreach ($item in $input){  
+    $DR = $DT.NewRow()  
+    $Item.PsObject.get_properties() | foreach {  
+      if ($first) {  
+        $Col =  new-object Data.DataColumn  
+        $Col.ColumnName = $_.Name.ToString()  
+        $DT.Columns.Add($Col)       }  
+      if ($_.value -eq $null) {  
+        $DR.Item($_.Name) = "[empty]"  
+      }  
+      elseif ($_.IsArray) {  
+        $DR.Item($_.Name) =[string]::Join($_.value ,";")  
+      }  
+      else {  
+        $DR.Item($_.Name) = $_.value  
+      }  
+    }  
+    $DT.Rows.Add($DR)  
+    $First = $false  
+  } 
+ 
+  return @(,($dt))
+ 
 }
