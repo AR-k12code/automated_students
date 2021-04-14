@@ -1,6 +1,8 @@
 Automated_Students
 ==================
 
+This is the repository for the public version of the Automated_Students project. It does not contain any additional scripts besides the required ones to run the project. If you're interested in having your district automated with a lot of additional functionality please contact Craig Millsap.
+
 This project started as an student account automation project using just the basic Clever files. However, that turned out to be insufficient.
 So a few modified Cognos reports and queries and this is the final project. The reports are located in 
 > Cognos > Team Content > Student Management System > _Share Temporarily Between Districts > Gentry > automation
