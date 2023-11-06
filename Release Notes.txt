@@ -1,0 +1,108 @@
+23.11.05
+* Updated for ACOT 2023
+
+21.04.14
+* Added EnablePostProcessingScripts.ps1 to create/delete symbolic links for scripts included in the project.
+* GCDS script is now generic so it can be used as a symbolic link. File must be saved as the $eSchooldsn.xml from settings.ps1.
+* Added the ability to delete suspended accounts that have never signed in or that haven't signed in after X Months.
+
+21.04.13
+* StopAfterXNew and StopAfterXExisting fixes so it didn't start the next loop.
+* Clever documentation on Team Roles
+* Expired Accounts Post Processing Task as well as added sample to x_InterimProcessingExistingAccounts.ps1.
+* PreK DB fix for Grade Field Length
+
+21.04.11
+* Accounted for blank activites file.
+* Fixes for MySQL database use.
+* Clever Post Processing Scripts.
+* Clever staff.csv file with Position/Title as School Tech Leads
+* Clever Staff google sheet for additional employees not in the Staff Catalog.
+* Action Logs
+
+21.04.01
+* I don't even want to talk about all the things I have done.
+* Moved from PSSqlite to SimplySQL to make the scripts database agnostic.
+* You can now use MySQL or MariaDB as the database engine.
+* Added Clever Staff as School Tech Leads based on their Titles.
+* Renamed automated_sqlite.ps1 to automated_database.ps1.
+* Deprecated x_PostProcessingAutomatedStudents.ps1 in favor of the PostProcessingScripts folder.
+
+21.03.07
+* Added setting to exclude grades from being imported into the database. $ExcludeGrades = @('Prekindergarten','PK')
+
+21.03.03
+* Quick mode now properly evaluates the overrides.
+* Added an AD Replication Check that should help find issues earlier.
+* Disable expired accounts script.
+* Backup DB in the x_PostProcessingSQLite sample script to Google Drive.
+
+21.03.01
+* Migrated to using the sqlite binary to import the enrollments CSV. This takes seconds instead of minutes.
+* QuickMode now evaluates Nickname if you use that to override First names in AD.
+* If GAMPreCreateUser is specified then GAM should be enabled with the APIs requested for this project. Switch to send emails via the API instead of SMTP.
+
+21.02.28
+* Add updating the timestamp if we aren't uploading a new Teachers Passwords csv. This keeps backwards compatibility for the Drive Search "after:yesterday Student Passwords for"
+* Added $StuPassforTeachersBuildings to settings.ps1 to control what buildings you want the student passwords shared to the teachers for.
+* Modified sample x_PostProcessingAutomatedStudents.ps1 to have a last-*.ps1 that will run after all other PostProcessingScripts run.
+
+21.02.26
+* Speed up uploading Teacher Passwords to Google Sheets by comparing existing file hash before uploading.
+* Additional script to see what accounts would be disabled.
+
+21.02.25
+* Fix sample student passwords for teachers for all schools.
+* Additional Duplicate Entries script variables.
+* Fixed using the $GoogleAccount settings on sharing google sheets.
+* Added start.ps1 launcher for QuickMode between the hours of 6AM-4PM.
+* Fix students_extras table cleanup when using Scheduled Homerooms.
+* Removed School_id,Grade from overrides.csv
+* Add inserting -ResetPasswords into the database. Even happens under staging. This will be useful for generating a report prior to actually changing all passwords.
+
+21.02.22
+* Included Backup database to Google Drive dbbackup folder in the x_PostProcessingSQLite.ps1. This will now keep versions of our database for a period of time.
+* Duplicate EmployeeNumber check. Duplicate EmployeeNumbers can cause issues when searching for specific Student_ids.
+* Additional Select-Object on CSV imports. This means we can modify the Cognos reports without breaking imports.
+* Fixed timestamps in automated_sqlite.ps1 to be a Select-Obect expression instead of adding it.
+
+21.02.20
+* Migrated individual tasks from x_PostProcessingAutomatedStudents.ps1 to the PostProcessingScripts folder. See Readme.txt
+
+21.0.19
+* Switched the clever.ps1 over to checking a Hash Table instead of a looping through Get-ADUser to fix mismatched emails on students.
+* Additional Calculated Changes output.
+* Fix OU Creation for ADStructures 5,6.
+* Fix excluded OUs if setting was missing from settings.ps1
+
+21.02.18
+* Error handling for GAM Duplicate Error
+* Do not disable students in an OU called Excluded. Will still be added to groups, etc.
+
+21.02.17
+* QuickMode - This now compares Student_id, GivenName, and Surname and only processes the mismatched.
+* Compare Settings script between settings.ps1 and sample_settings.ps1.
+
+21.02.15
+* Move cognos downloads to a parallel syncronous download.
+
+21.0.2.14
+* Added DinoPass to the Password Option.
+* Fix modifying existing database (upgrade)
+
+20.17.20
+* If you modify the enrollments date it will now pull them back from the enrollments_archived table.
+
+20.15.20
+* Delayed removing enrollments. This issue is because schedule changes started more than a month in advance.
+
+- [X] Fix Timestamps and make it an Expression
+- [X] Get-ADUser where EmployeeNumber group -ge 2 FULL STOP!
+- [ ] Backup Group Data into DB
+- [ ] Add additional contact types and have clever filter on G only.
+- [X] DB Backups (compression?)
+- [X] Automated-SQL needs to have a Select Expression so Cognos Reports can change without breaking backwards compatibility.
+- [ ] Modify contacts to include Type (Guardian or Emergency), Add HAC_Login, Add AccessCode.
+- [ ] Start Release Notes
+- [ ] Add another ad structure that just does buildings. No ous for Grade or GradYR
+- [ ] Make a handout on what not to do and handle things when you need to intervene.
